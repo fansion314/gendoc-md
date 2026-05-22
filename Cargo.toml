@@ -2,9 +2,10 @@
 name = "gendoc-md"
 version = "0.1.0"
 edition = "2024"
+authors = ["Peilin Fan <peilin.fan@foxmail.com>"]
 description = "Generate nested Markdown API maps for local Python projects."
 license = "MIT"
-repository = "https://github.com/your-org/gendoc-md"
+repository = "https://github.com/fansion314/gendoc-md"
 readme = "README.md"
 
 [[bin]]

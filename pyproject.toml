@@ -9,7 +9,7 @@ description = "Generate nested Markdown API maps for local Python projects."
 readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "MIT" }
-authors = [{ name = "gendoc-md contributors" }]
+authors = [{ name = "Peilin Fan", email = "peilin.fan@foxmail.com" }]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: Console",
@@ -20,7 +20,8 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/your-org/gendoc-md"
+Homepage = "https://github.com/fansion314/gendoc-md"
+Repository = "https://github.com/fansion314/gendoc-md"
 
 [tool.maturin]
 bindings = "bin"
