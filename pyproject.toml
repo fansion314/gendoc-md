@@ -8,8 +8,9 @@ version = "0.1.0"
 description = "Generate nested Markdown API maps for local Python projects."
 readme = "README.md"
 requires-python = ">=3.8"
-license = { text = "MIT" }
+license = "MIT"
 authors = [{ name = "Peilin Fan", email = "peilin.fan@foxmail.com" }]
+keywords = ["documentation", "markdown", "api", "rust", "cli"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: Console",
