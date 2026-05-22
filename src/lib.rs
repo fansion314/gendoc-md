@@ -29,15 +29,16 @@ pub fn run_with_options(options: Options) -> Result<()> {
 
     validate_output_dir(&options.output)?;
 
-    let targets = discover::discover_targets(&options)?;
-    let mut documents = targets
+    let discovered = discover::discover_targets(&options)?;
+    let mut documents = discovered
+        .targets
         .par_iter()
         .map(python::parse_target)
         .collect::<Result<Vec<_>>>()?;
 
     documents.sort_by(|left, right| left.import_name.cmp(&right.import_name));
 
-    let rendered = render::render_project(&documents, &options)?;
+    let rendered = render::render_project(&documents, &discovered.tree, &options)?;
     write_rendered_files(&options.output, rendered)?;
 
     Ok(())

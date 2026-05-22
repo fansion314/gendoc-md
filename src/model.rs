@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12,6 +13,27 @@ pub struct SourceTarget {
     pub path: PathBuf,
     pub root: PathBuf,
     pub kind: TargetKind,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct DiscoveredProject {
+    pub targets: Vec<SourceTarget>,
+    pub tree: SourceTree,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct SourceTree {
+    pub top_level: Vec<String>,
+    pub children_by_parent: BTreeMap<String, Vec<String>>,
+}
+
+impl SourceTree {
+    pub fn children(&self, parent: &str) -> &[String] {
+        self.children_by_parent
+            .get(parent)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

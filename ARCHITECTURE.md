@@ -50,7 +50,7 @@ There is no network logic in v1. If network behavior is added later, it should b
 1. `main` calls `gendoc_md::run()`.
 2. `cli` parses arguments into `Options`.
 3. `discover` builds search roots, resolves explicit `-p`/`-m` targets or discovers top-level targets when none are provided.
-4. `discover` expands package targets into Python files and assigns each file an import name and output path kind.
+4. `discover` expands package targets into Python files, assigns each file an import name, and builds the package/module tree used by rendering.
 5. `python` parses files in parallel and extracts module docstrings, `__all__`, public functions, classes, and public class members.
 6. `render` builds all Markdown text in memory, including the top-level `index.md`.
 7. Only after successful discovery, parsing, and rendering does the writer clear the output directory and write the new files.

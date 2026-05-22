@@ -6,36 +6,86 @@ use ignore::WalkBuilder;
 
 use crate::cli::Options;
 use crate::diagnostics::GendocError;
-use crate::model::{SourceTarget, TargetKind};
+use crate::model::{DiscoveredProject, SourceTarget, SourceTree, TargetKind};
 
-pub fn discover_targets(options: &Options) -> Result<Vec<SourceTarget>> {
+pub fn discover_targets(options: &Options) -> Result<DiscoveredProject> {
     let roots = search_roots(options)?;
     let output = absolute_path(&options.output)?;
-    let mut targets = BTreeMap::<String, SourceTarget>::new();
+    let mut discovered = DiscoveryBuilder::default();
 
     if options.packages.is_empty() && options.modules.is_empty() {
-        for target in discover_top_level(&roots, &output)? {
-            targets.entry(target.import_name.clone()).or_insert(target);
-        }
+        discovered.merge(discover_top_level(&roots, &output)?);
     } else {
         for package in &options.packages {
             validate_import_name(package)?;
             let target = resolve_package(package, &roots)?;
-            for package_target in expand_package(&target, &output)? {
-                targets
-                    .entry(package_target.import_name.clone())
-                    .or_insert(package_target);
-            }
+            discovered.merge(expand_package(&target, &output)?);
         }
 
         for module in &options.modules {
             validate_import_name(module)?;
             let target = resolve_module(module, &roots)?;
-            targets.entry(target.import_name.clone()).or_insert(target);
+            discovered.add_target(target);
         }
     }
 
-    Ok(targets.into_values().collect())
+    Ok(discovered.finish())
+}
+
+#[derive(Debug, Default)]
+struct DiscoveryBuilder {
+    targets: BTreeMap<String, SourceTarget>,
+    top_level: BTreeSet<String>,
+    children_by_parent: BTreeMap<String, BTreeSet<String>>,
+}
+
+impl DiscoveryBuilder {
+    fn add_target(&mut self, target: SourceTarget) {
+        self.add_import_name(&target.import_name);
+        self.targets
+            .entry(target.import_name.clone())
+            .or_insert(target);
+    }
+
+    fn merge(&mut self, other: DiscoveryBuilder) {
+        self.top_level.extend(other.top_level);
+        for (parent, children) in other.children_by_parent {
+            self.children_by_parent
+                .entry(parent)
+                .or_default()
+                .extend(children);
+        }
+        for target in other.targets.into_values() {
+            self.targets
+                .entry(target.import_name.clone())
+                .or_insert(target);
+        }
+    }
+
+    fn finish(self) -> DiscoveredProject {
+        DiscoveredProject {
+            targets: self.targets.into_values().collect(),
+            tree: SourceTree {
+                top_level: self.top_level.into_iter().collect(),
+                children_by_parent: self
+                    .children_by_parent
+                    .into_iter()
+                    .map(|(parent, children)| (parent, children.into_iter().collect()))
+                    .collect(),
+            },
+        }
+    }
+
+    fn add_import_name(&mut self, import_name: &str) {
+        if let Some((parent, _)) = import_name.rsplit_once('.') {
+            self.children_by_parent
+                .entry(parent.to_string())
+                .or_default()
+                .insert(import_name.to_string());
+        } else {
+            self.top_level.insert(import_name.to_string());
+        }
+    }
 }
 
 fn absolute_path(path: &Path) -> Result<PathBuf> {
@@ -70,8 +120,8 @@ pub fn search_roots(options: &Options) -> Result<Vec<PathBuf>> {
     Ok(existing)
 }
 
-fn discover_top_level(roots: &[PathBuf], output: &Path) -> Result<Vec<SourceTarget>> {
-    let mut targets = BTreeMap::new();
+fn discover_top_level(roots: &[PathBuf], output: &Path) -> Result<DiscoveryBuilder> {
+    let mut discovered = DiscoveryBuilder::default();
     for root in roots {
         for entry in std::fs::read_dir(root)
             .with_context(|| format!("failed to read search root {}", root.display()))?
@@ -91,9 +141,7 @@ fn discover_top_level(roots: &[PathBuf], output: &Path) -> Result<Vec<SourceTarg
                         root: root.clone(),
                         kind: TargetKind::Package,
                     };
-                    for target in expand_package(&package, output)? {
-                        targets.entry(target.import_name.clone()).or_insert(target);
-                    }
+                    discovered.merge(expand_package(&package, output)?);
                 }
             } else if path.extension().is_some_and(|ext| ext == "py") {
                 let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
@@ -102,7 +150,7 @@ fn discover_top_level(roots: &[PathBuf], output: &Path) -> Result<Vec<SourceTarg
                 if stem == "__init__" || !is_identifier(stem) {
                     continue;
                 }
-                targets.entry(stem.to_string()).or_insert(SourceTarget {
+                discovered.add_target(SourceTarget {
                     import_name: stem.to_string(),
                     path,
                     root: root.clone(),
@@ -112,7 +160,7 @@ fn discover_top_level(roots: &[PathBuf], output: &Path) -> Result<Vec<SourceTarg
         }
     }
 
-    Ok(targets.into_values().collect())
+    Ok(discovered)
 }
 
 fn resolve_package(import_name: &str, roots: &[PathBuf]) -> Result<SourceTarget> {
@@ -161,12 +209,12 @@ fn resolve_module(import_name: &str, roots: &[PathBuf]) -> Result<SourceTarget> 
     .into())
 }
 
-fn expand_package(package: &SourceTarget, output: &Path) -> Result<Vec<SourceTarget>> {
+fn expand_package(package: &SourceTarget, output: &Path) -> Result<DiscoveryBuilder> {
     let package_dir = package
         .path
         .parent()
         .context("package __init__.py has no parent directory")?;
-    let mut targets = BTreeMap::new();
+    let mut discovered = DiscoveryBuilder::default();
 
     let mut builder = WalkBuilder::new(package_dir);
     let output = output.to_path_buf();
@@ -185,11 +233,11 @@ fn expand_package(package: &SourceTarget, output: &Path) -> Result<Vec<SourceTar
         }
 
         if let Some(target) = target_from_path(path, &package.root)? {
-            targets.entry(target.import_name.clone()).or_insert(target);
+            discovered.add_target(target);
         }
     }
 
-    Ok(targets.into_values().collect())
+    Ok(discovered)
 }
 
 fn target_from_path(path: &Path, root: &Path) -> Result<Option<SourceTarget>> {
@@ -329,10 +377,40 @@ fn is_identifier(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+
+    use crate::cli::Options;
 
     #[test]
     fn validates_import_names() {
         assert!(validate_import_name("pkg.mod").is_ok());
         assert!(validate_import_name("pkg.1bad").is_err());
+    }
+
+    #[test]
+    fn discovery_builds_import_tree() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("src");
+        let pkg = root.join("pkg");
+        let sub = pkg.join("sub");
+        fs::create_dir_all(&sub).unwrap();
+        fs::write(pkg.join("__init__.py"), "").unwrap();
+        fs::write(pkg.join("mod.py"), "").unwrap();
+        fs::write(sub.join("__init__.py"), "").unwrap();
+        fs::write(sub.join("leaf.py"), "").unwrap();
+
+        let discovered = discover_targets(&Options {
+            inputs: vec![root],
+            packages: vec!["pkg".to_string()],
+            modules: Vec::new(),
+            output: temp.path().join("docs/api-md"),
+            render_toc: false,
+            jobs: None,
+        })
+        .unwrap();
+
+        assert_eq!(discovered.tree.top_level, vec!["pkg"]);
+        assert_eq!(discovered.tree.children("pkg"), ["pkg.mod", "pkg.sub"]);
+        assert_eq!(discovered.tree.children("pkg.sub"), ["pkg.sub.leaf"]);
     }
 }
