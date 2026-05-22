@@ -1,8 +1,17 @@
+//! Command line argument parsing for `gendoc-md`.
+//!
+//! This module only translates user input into an [`Options`] value. It does
+//! not perform discovery, parsing, rendering, or filesystem mutations.
+
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
 
 use clap::Parser;
 
+/// Runtime options accepted by the documentation generator.
+///
+/// Values come from Clap when running the binary, but tests and library callers
+/// may also construct this type directly for deterministic execution.
 #[derive(Debug, Clone, Parser)]
 #[command(
     name = "gendoc-md",
@@ -10,15 +19,19 @@ use clap::Parser;
     about = "Generate nested Markdown API maps for local Python projects."
 )]
 pub struct Options {
+    /// Search roots used to resolve Python packages and modules.
     #[arg(short = 'i', long = "input", value_name = "DIR")]
     pub inputs: Vec<PathBuf>,
 
+    /// Explicit Python package import names to document recursively.
     #[arg(short = 'p', long = "package", value_name = "IMPORT_NAME")]
     pub packages: Vec<String>,
 
+    /// Explicit Python module import names to document as individual files.
     #[arg(short = 'm', long = "module", value_name = "IMPORT_NAME")]
     pub modules: Vec<String>,
 
+    /// Directory where generated Markdown files are written.
     #[arg(
         short = 'o',
         long = "output",
@@ -27,18 +40,22 @@ pub struct Options {
     )]
     pub output: PathBuf,
 
+    /// Whether rendered Markdown pages include table-of-contents sections.
     #[arg(long = "render-toc")]
     pub render_toc: bool,
 
+    /// Optional Rayon worker count for parallel parsing and rendering.
     #[arg(short = 'j', long = "jobs", value_name = "N")]
     pub jobs: Option<NonZeroUsize>,
 }
 
 impl Options {
+    /// Return whether table-of-contents sections should be rendered.
     pub fn render_toc(&self) -> bool {
         self.render_toc
     }
 
+    /// Return the configured worker count, defaulting to available CPUs.
     pub fn effective_jobs(&self) -> usize {
         self.jobs
             .map(NonZeroUsize::get)
@@ -46,6 +63,7 @@ impl Options {
     }
 }
 
+/// Parse command line arguments into [`Options`].
 pub fn parse() -> Options {
     Options::parse()
 }

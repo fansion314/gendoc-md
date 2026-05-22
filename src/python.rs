@@ -1,3 +1,9 @@
+//! Static Python parsing and API extraction.
+//!
+//! This module uses RustPython/Ruff parser crates to inspect syntax without
+//! importing or executing target code. It extracts stable documentation facts
+//! and leaves Markdown formatting to the renderer.
+
 use std::fs;
 use std::path::PathBuf;
 
@@ -9,13 +15,29 @@ use crate::model::{
     ApiItem, ClassDoc, Document, DocumentKind, FunctionDoc, SourceTarget, TargetKind,
 };
 
+/// Parse one discovered Python source target from disk.
+///
+/// # Errors
+///
+/// Returns an error when the file cannot be read or parsed.
 pub fn parse_target(target: &SourceTarget) -> Result<Document> {
     let source = fs::read_to_string(&target.path)
         .with_context(|| format!("failed to read {}", target.path.display()))?;
     parse_source(target, &source)
 }
 
+/// Parse Python source text into a renderable [`Document`].
+///
+/// The extractor records module docstrings, static `__all__` values, public
+/// functions, public classes, and public methods directly defined in classes.
+///
+/// # Errors
+///
+/// Returns an error when the source is not valid Python for the parser.
 pub fn parse_source(target: &SourceTarget, source: &str) -> Result<Document> {
+    // Implementation note: source ranges are kept against the original string
+    // so signatures and decorators preserve user formatting.
+
     let parsed = ruff_python_parser::parse_module(source)
         .with_context(|| format!("failed to parse {}", target.path.display()))?;
     let module = parsed.syntax();
@@ -40,6 +62,7 @@ pub fn parse_source(target: &SourceTarget, source: &str) -> Result<Document> {
     })
 }
 
+/// Compute the Markdown output path for an import name.
 fn output_path_for(import_name: &str, kind: &TargetKind) -> PathBuf {
     let mut path = import_name.split('.').collect::<PathBuf>();
     match kind {
@@ -51,6 +74,7 @@ fn output_path_for(import_name: &str, kind: &TargetKind) -> PathBuf {
     path
 }
 
+/// Extract a suite docstring from the first statement, if present.
 fn suite_docstring(body: &[Stmt]) -> Option<String> {
     let Some(Stmt::Expr(expr_stmt)) = body.first() else {
         return None;
@@ -58,6 +82,7 @@ fn suite_docstring(body: &[Stmt]) -> Option<String> {
     string_expr_value(&expr_stmt.value)
 }
 
+/// Return the first non-empty trimmed line of a docstring.
 fn first_doc_line(docstring: &str) -> Option<String> {
     docstring
         .lines()
@@ -66,6 +91,7 @@ fn first_doc_line(docstring: &str) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
+/// Extract static string values assigned to `__all__`.
 fn extract_all(body: &[Stmt]) -> Vec<String> {
     for stmt in body {
         let Stmt::Assign(assign) = stmt else {
@@ -79,6 +105,7 @@ fn extract_all(body: &[Stmt]) -> Vec<String> {
     Vec::new()
 }
 
+/// Extract public top-level functions and classes from a module suite.
 fn extract_api_items(body: &[Stmt], source: &str) -> Vec<ApiItem> {
     let mut items = Vec::new();
     for stmt in body {
@@ -95,6 +122,7 @@ fn extract_api_items(body: &[Stmt], source: &str) -> Vec<ApiItem> {
     items
 }
 
+/// Build documentation for a Python function definition.
 fn function_doc(function: &StmtFunctionDef, source: &str) -> FunctionDoc {
     FunctionDoc {
         name: function.name.to_string(),
@@ -105,6 +133,7 @@ fn function_doc(function: &StmtFunctionDef, source: &str) -> FunctionDoc {
     }
 }
 
+/// Build documentation for a Python class definition and its public methods.
 fn class_doc(class: &StmtClassDef, source: &str) -> ClassDoc {
     let methods = class
         .body
@@ -125,6 +154,7 @@ fn class_doc(class: &StmtClassDef, source: &str) -> ClassDoc {
     }
 }
 
+/// Return a string literal expression's value.
 fn string_expr_value(expr: &Expr) -> Option<String> {
     match expr {
         Expr::StringLiteral(string) => Some(string.value.to_str().to_string()),
@@ -132,6 +162,7 @@ fn string_expr_value(expr: &Expr) -> Option<String> {
     }
 }
 
+/// Return literal string values from a list or tuple expression.
 fn string_sequence(expr: &Expr) -> Vec<String> {
     match expr {
         Expr::List(list) => list.elts.iter().filter_map(string_expr_value).collect(),
@@ -140,10 +171,12 @@ fn string_sequence(expr: &Expr) -> Vec<String> {
     }
 }
 
+/// Return whether an expression is the name `__all__`.
 fn is_all_name(expr: &Expr) -> bool {
     matches!(expr, Expr::Name(name) if name.id.as_str() == "__all__")
 }
 
+/// Extract decorator expressions without the leading `@`.
 fn decorators(source: &str, decorators: &[ruff_python_ast::Decorator]) -> Vec<String> {
     decorators
         .iter()
@@ -155,13 +188,21 @@ fn decorators(source: &str, decorators: &[ruff_python_ast::Decorator]) -> Vec<St
         .collect()
 }
 
+/// Header style to locate inside a parsed statement range.
 #[derive(Debug, Clone, Copy)]
 enum HeaderKind {
+    /// Function or async function declaration.
     Function,
+    /// Class declaration.
     Class,
 }
 
+/// Extract a declaration header from a statement range.
 fn header_from_range(source: &str, range: TextRange, kind: HeaderKind) -> String {
+    // Implementation note: ranges include decorators, so scanning starts at the
+    // first actual declaration marker before collecting a possibly multiline
+    // signature.
+
     let slice = source_for_range(source, range);
     let markers: &[&str] = match kind {
         HeaderKind::Function => &["def ", "async def "],
@@ -186,21 +227,26 @@ fn header_from_range(source: &str, range: TextRange, kind: HeaderKind) -> String
     lines.join("\n")
 }
 
+/// Return the source slice for a parser text range.
 fn source_for_range(source: &str, range: TextRange) -> &str {
     let start = usize::from(range.start());
     let end = usize::from(range.end());
     source.get(start..end).unwrap_or("")
 }
 
+/// Return whether a Python name is public by this tool's convention.
 fn is_public(name: &str) -> bool {
     !name.starts_with('_')
 }
 
 #[cfg(test)]
 mod tests {
+    //! Unit tests for parser extraction details.
+
     use super::*;
     use crate::model::{SourceTarget, TargetKind};
 
+    /// Build a reusable module target for parser tests.
     fn target() -> SourceTarget {
         SourceTarget {
             import_name: "pkg.mod".to_string(),
@@ -210,6 +256,7 @@ mod tests {
         }
     }
 
+    /// Verify module docstrings, `__all__`, functions, classes, and methods.
     #[test]
     fn extracts_docstrings_exports_and_public_api() {
         let source = r#""""Module summary.
@@ -249,6 +296,7 @@ class Thing:
         assert_eq!(class.methods[0].decorators, vec!["property"]);
     }
 
+    /// Verify multiline exports and signatures preserve useful header text.
     #[test]
     fn extracts_multiline_all_and_signatures() {
         let source = r#""""Module."""

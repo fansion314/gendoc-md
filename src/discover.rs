@@ -1,3 +1,10 @@
+//! Python target discovery and import-tree construction.
+//!
+//! Discovery maps local regular Python packages and modules to dotted import
+//! names without importing target code. It also excludes generated output and
+//! common cache/build directories so the renderer never documents its own
+//! Markdown or tool artifacts.
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -8,7 +15,20 @@ use crate::cli::Options;
 use crate::diagnostics::GendocError;
 use crate::model::{DiscoveredProject, SourceTarget, SourceTree, TargetKind};
 
+/// Discover Python packages and modules selected by [`Options`].
+///
+/// When explicit packages or modules are provided, only those targets are
+/// resolved. Otherwise, discovery scans existing search roots for top-level
+/// regular packages and modules.
+///
+/// # Errors
+///
+/// Returns an error when search roots cannot be canonicalized, import names are
+/// invalid, requested targets cannot be found, or package walking fails.
 pub fn discover_targets(options: &Options) -> Result<DiscoveredProject> {
+    // Implementation note: discovery compares against the absolute output path
+    // so default scans do not recursively include previously generated docs.
+
     let roots = search_roots(options)?;
     let output = absolute_path(&options.output)?;
     let mut discovered = DiscoveryBuilder::default();
@@ -32,14 +52,19 @@ pub fn discover_targets(options: &Options) -> Result<DiscoveredProject> {
     Ok(discovered.finish())
 }
 
+/// Mutable accumulator that preserves deterministic ordering while discovering.
 #[derive(Debug, Default)]
 struct DiscoveryBuilder {
+    /// Targets keyed by import name to deduplicate overlapping search roots.
     targets: BTreeMap<String, SourceTarget>,
+    /// Top-level import names.
     top_level: BTreeSet<String>,
+    /// Direct children keyed by parent import name.
     children_by_parent: BTreeMap<String, BTreeSet<String>>,
 }
 
 impl DiscoveryBuilder {
+    /// Add one target and record its import tree position.
     fn add_target(&mut self, target: SourceTarget) {
         self.add_import_name(&target.import_name);
         self.targets
@@ -47,6 +72,7 @@ impl DiscoveryBuilder {
             .or_insert(target);
     }
 
+    /// Merge another discovery accumulator into this one.
     fn merge(&mut self, other: DiscoveryBuilder) {
         self.top_level.extend(other.top_level);
         for (parent, children) in other.children_by_parent {
@@ -62,6 +88,7 @@ impl DiscoveryBuilder {
         }
     }
 
+    /// Convert the accumulator into the public discovery model.
     fn finish(self) -> DiscoveredProject {
         DiscoveredProject {
             targets: self.targets.into_values().collect(),
@@ -76,6 +103,7 @@ impl DiscoveryBuilder {
         }
     }
 
+    /// Record an import name in the source tree.
     fn add_import_name(&mut self, import_name: &str) {
         if let Some((parent, _)) = import_name.rsplit_once('.') {
             self.children_by_parent
@@ -88,6 +116,11 @@ impl DiscoveryBuilder {
     }
 }
 
+/// Resolve a path against the current directory without requiring it to exist.
+///
+/// # Errors
+///
+/// Returns an error when the current directory cannot be read.
 fn absolute_path(path: &Path) -> Result<PathBuf> {
     let cwd = std::env::current_dir().context("failed to read current directory")?;
     Ok(if path.is_absolute() {
@@ -97,6 +130,13 @@ fn absolute_path(path: &Path) -> Result<PathBuf> {
     })
 }
 
+/// Return existing, canonical search roots for Python import resolution.
+///
+/// Defaults to `src` and `.` when no input roots are configured.
+///
+/// # Errors
+///
+/// Returns an error when an existing root cannot be canonicalized.
 pub fn search_roots(options: &Options) -> Result<Vec<PathBuf>> {
     let roots = if options.inputs.is_empty() {
         vec![PathBuf::from("src"), PathBuf::from(".")]
@@ -120,6 +160,12 @@ pub fn search_roots(options: &Options) -> Result<Vec<PathBuf>> {
     Ok(existing)
 }
 
+/// Discover top-level regular Python packages and modules under search roots.
+///
+/// # Errors
+///
+/// Returns an error when a search root cannot be read or package expansion
+/// fails.
 fn discover_top_level(roots: &[PathBuf], output: &Path) -> Result<DiscoveryBuilder> {
     let mut discovered = DiscoveryBuilder::default();
     for root in roots {
@@ -163,6 +209,11 @@ fn discover_top_level(roots: &[PathBuf], output: &Path) -> Result<DiscoveryBuild
     Ok(discovered)
 }
 
+/// Resolve an explicit package import name to its `__init__.py`.
+///
+/// # Errors
+///
+/// Returns [`GendocError::PackageNotFound`] when no root contains the package.
 fn resolve_package(import_name: &str, roots: &[PathBuf]) -> Result<SourceTarget> {
     let rel_dir = import_name.replace('.', std::path::MAIN_SEPARATOR_STR);
     for root in roots {
@@ -185,6 +236,11 @@ fn resolve_package(import_name: &str, roots: &[PathBuf]) -> Result<SourceTarget>
     .into())
 }
 
+/// Resolve an explicit module import name to its `.py` file.
+///
+/// # Errors
+///
+/// Returns [`GendocError::ModuleNotFound`] when no root contains the module.
 fn resolve_module(import_name: &str, roots: &[PathBuf]) -> Result<SourceTarget> {
     let rel_file = format!(
         "{}.py",
@@ -209,7 +265,16 @@ fn resolve_module(import_name: &str, roots: &[PathBuf]) -> Result<SourceTarget> 
     .into())
 }
 
+/// Expand a regular package into all documentable Python files below it.
+///
+/// # Errors
+///
+/// Returns an error when the package path is malformed or walking fails.
 fn expand_package(package: &SourceTarget, output: &Path) -> Result<DiscoveryBuilder> {
+    // Implementation note: `ignore` honors common ignore files while the custom
+    // filter prevents generated output and build/cache directories from leaking
+    // into documentation.
+
     let package_dir = package
         .path
         .parent()
@@ -240,6 +305,11 @@ fn expand_package(package: &SourceTarget, output: &Path) -> Result<DiscoveryBuil
     Ok(discovered)
 }
 
+/// Build a source target for a Python path if it is inside regular packages.
+///
+/// # Errors
+///
+/// Returns an error when the path cannot be related to the search root.
 fn target_from_path(path: &Path, root: &Path) -> Result<Option<SourceTarget>> {
     if !is_inside_regular_package(path, root)? {
         return Ok(None);
@@ -299,6 +369,11 @@ fn target_from_path(path: &Path, root: &Path) -> Result<Option<SourceTarget>> {
     }))
 }
 
+/// Return whether every parent from `root` to `path` has an `__init__.py`.
+///
+/// # Errors
+///
+/// Returns an error when the package path cannot be stripped from the root.
 fn is_inside_regular_package(path: &Path, root: &Path) -> Result<bool> {
     let package_dir = path.parent();
     let Some(package_dir) = package_dir else {
@@ -327,6 +402,7 @@ fn is_inside_regular_package(path: &Path, root: &Path) -> Result<bool> {
     Ok(true)
 }
 
+/// Return whether a path should be excluded from discovery.
 fn should_skip_path(path: &Path, output: &Path) -> bool {
     let name = path
         .file_name()
@@ -350,6 +426,7 @@ fn should_skip_path(path: &Path, output: &Path) -> bool {
     ) || same_or_inside(path, output)
 }
 
+/// Return whether `path` is equal to or nested below `parent`.
 fn same_or_inside(path: &Path, parent: &Path) -> bool {
     if parent.as_os_str().is_empty() {
         return false;
@@ -357,6 +434,12 @@ fn same_or_inside(path: &Path, parent: &Path) -> bool {
     path == parent || path.starts_with(parent)
 }
 
+/// Validate a dotted Python import name.
+///
+/// # Errors
+///
+/// Returns [`GendocError::InvalidImportName`] when any component is not a
+/// Python-style ASCII identifier accepted by this tool.
 fn validate_import_name(import_name: &str) -> Result<()> {
     if import_name.split('.').all(is_identifier) {
         Ok(())
@@ -365,6 +448,7 @@ fn validate_import_name(import_name: &str) -> Result<()> {
     }
 }
 
+/// Return whether a string is an ASCII Python identifier accepted by discovery.
 fn is_identifier(value: &str) -> bool {
     let mut chars = value.chars();
     let Some(first) = chars.next() else {
@@ -376,17 +460,21 @@ fn is_identifier(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    //! Unit tests for discovery edge cases that do not require spawning the CLI.
+
     use super::*;
     use std::fs;
 
     use crate::cli::Options;
 
+    /// Validate dotted import names and reject invalid components.
     #[test]
     fn validates_import_names() {
         assert!(validate_import_name("pkg.mod").is_ok());
         assert!(validate_import_name("pkg.1bad").is_err());
     }
 
+    /// Verify package expansion records top-level and child import names.
     #[test]
     fn discovery_builds_import_tree() {
         let temp = tempfile::tempdir().unwrap();

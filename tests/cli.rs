@@ -1,9 +1,16 @@
+//! Integration tests for the `gendoc-md` binary.
+//!
+//! These tests exercise end-to-end CLI behavior with temporary Python projects
+//! so discovery, parsing, rendering, and output replacement stay covered
+//! together.
+
 use std::fs;
 
 use assert_cmd::Command;
 use predicates::prelude::*;
 use tempfile::tempdir;
 
+/// Verify default discovery output for an explicit package target.
 #[test]
 fn generates_docs_for_default_src_project() {
     let temp = tempdir().unwrap();
@@ -64,6 +71,7 @@ class Tool:
     assert!(module.contains("#### Tool.build"));
 }
 
+/// Verify that optional table-of-contents rendering is controlled by the CLI.
 #[test]
 fn render_toc_flag_enables_tables_of_contents() {
     let temp = tempdir().unwrap();
@@ -87,6 +95,7 @@ fn render_toc_flag_enables_tables_of_contents() {
     assert!(pkg_index.contains("## Table of Contents"));
 }
 
+/// Verify existing generated docs are preserved when parsing fails.
 #[test]
 fn parse_failure_keeps_existing_output() {
     let temp = tempdir().unwrap();
