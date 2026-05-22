@@ -1,5 +1,9 @@
 # gendoc-md
 
+[![PyPI](https://img.shields.io/pypi/v/gendoc-md.svg)](https://pypi.org/project/gendoc-md/)
+[![Release](https://github.com/fansion314/gendoc-md/actions/workflows/release.yml/badge.svg)](https://github.com/fansion314/gendoc-md/actions/workflows/release.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 `gendoc-md` statically reads a local Python project and generates a nested Markdown API map under `docs/api-md`.
 
 ```bash
@@ -8,7 +12,13 @@ gendoc-md -p your_package
 
 The generated docs are intended as a quick index for LLMs and humans. The tool does not import or execute the target Python project.
 
-## Install From Source
+## Install
+
+```bash
+pip install gendoc-md
+```
+
+To install from a local checkout:
 
 ```bash
 python -m pip install .
