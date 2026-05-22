@@ -10,6 +10,27 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 use tempfile::tempdir;
 
+/// Verify short and long help flags print the same compact help text.
+#[test]
+fn short_and_long_help_output_match() {
+    let short_help = Command::cargo_bin("gendoc-md")
+        .unwrap()
+        .arg("-h")
+        .output()
+        .unwrap();
+    let long_help = Command::cargo_bin("gendoc-md")
+        .unwrap()
+        .arg("--help")
+        .output()
+        .unwrap();
+
+    assert!(short_help.status.success());
+    assert!(long_help.status.success());
+    assert_eq!(short_help.stdout, long_help.stdout);
+    assert!(short_help.stderr.is_empty());
+    assert!(long_help.stderr.is_empty());
+}
+
 /// Verify default discovery output for an explicit package target.
 #[test]
 fn generates_docs_for_default_src_project() {

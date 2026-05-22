@@ -6,7 +6,7 @@
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
 
-use clap::Parser;
+use clap::{Arg, ArgAction, CommandFactory, FromArgMatches, Parser};
 
 /// Runtime options accepted by the documentation generator.
 ///
@@ -65,5 +65,16 @@ impl Options {
 
 /// Parse command line arguments into [`Options`].
 pub fn parse() -> Options {
-    Options::parse()
+    let matches = Options::command()
+        .disable_help_flag(true)
+        .arg(
+            Arg::new("help")
+                .short('h')
+                .long("help")
+                .action(ArgAction::HelpShort)
+                .help("Print help (see more with '--help')"),
+        )
+        .get_matches();
+
+    Options::from_arg_matches(&matches).unwrap_or_else(|error| error.exit())
 }
