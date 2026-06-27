@@ -76,20 +76,29 @@ class Tool:
         .success();
 
     let top_index = fs::read_to_string(root.join("docs/api-md/index.md")).unwrap();
+    assert_single_final_newline(&top_index);
     assert!(top_index.contains("Do not modify"));
     assert!(top_index.contains("[sample_pkg](sample_pkg/index.md)"));
     assert!(!top_index.contains("## Table of Contents"));
     assert!(!root.join("docs/api-md/stale.md").exists());
 
     let pkg_index = fs::read_to_string(root.join("docs/api-md/sample_pkg/index.md")).unwrap();
+    assert_single_final_newline(&pkg_index);
     assert!(pkg_index.contains("# sample_pkg"));
     assert!(pkg_index.contains("[sample_pkg.tools](tools.md)"));
     assert!(pkg_index.contains("### make"));
     assert!(pkg_index.contains("def make(value: int) -> str:"));
 
     let module = fs::read_to_string(root.join("docs/api-md/sample_pkg/tools.md")).unwrap();
+    assert_single_final_newline(&module);
     assert!(module.contains("### Tool"));
     assert!(module.contains("#### Tool.build"));
+}
+
+/// Verify generated Markdown has a final newline without a blank line at EOF.
+fn assert_single_final_newline(content: &str) {
+    assert!(content.ends_with('\n'));
+    assert!(!content.ends_with("\n\n"));
 }
 
 /// Verify that optional table-of-contents rendering is controlled by the CLI.

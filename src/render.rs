@@ -103,7 +103,7 @@ fn render_top_index(
 
     RenderedFile {
         path: PathBuf::from("index.md"),
-        content,
+        content: finish_markdown(content),
     }
 }
 
@@ -177,7 +177,17 @@ fn render_document(
         content.push_str("_No public classes or functions defined in this file._\n");
     }
 
-    content
+    finish_markdown(content)
+}
+
+/// Normalize the end of generated Markdown to one final newline.
+fn finish_markdown(content: String) -> String {
+    // Implementation note: render helpers intentionally add blank lines while
+    // composing sections, so the final boundary trims only EOF whitespace.
+
+    let mut finished = content.trim_end().to_string();
+    finished.push('\n');
+    finished
 }
 
 /// Render one API item and any nested methods into Markdown.
